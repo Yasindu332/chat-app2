@@ -1,0 +1,300 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Firebase Chat App — Clear Chat + Scroll + Login</title>
+  <style>
+    body {
+      margin:0; font-family:Arial, sans-serif; background:#e5ddd5;
+      height:100vh; display:flex; justify-content:center; align-items:center;
+    }
+
+    #app-container {
+      width:100%; max-width:420px; height:100vh;
+      display:flex; justify-content:center; align-items:center;
+    }
+
+    #login-screen, #chat-screen {
+      display:none; flex-direction:column; width:100%;
+      height:100%; background:white; border-radius:10px;
+      overflow:hidden; box-shadow:0 0 10px rgba(0,0,0,0.2);
+    }
+
+    #login-screen.active, #chat-screen.active {display:flex;}
+
+    /* LOGIN */
+    #login-screen {
+      justify-content:center; align-items:center; text-align:center; padding:20px;
+    }
+    #login-screen input {
+      padding:10px; border:1px solid #ccc; border-radius:5px; width:80%; margin-bottom:15px;
+    }
+    #login-screen button {
+      padding:10px 20px; border:none; background:#25d366; color:white;
+      border-radius:5px; cursor:pointer; font-weight:bold;
+    }
+
+    /* CHAT */
+    #chat-header {
+      background:#075e54; color:white; padding:10px;
+      display:flex; justify-content:space-between; align-items:center;
+      flex-shrink:0;
+    }
+    #welcome {font-weight:bold;}
+    #header-buttons {
+      display:flex; gap:6px;
+    }
+    .header-btn {
+      background:#128c7e; border:none; color:white; padding:5px 10px;
+      border-radius:5px; cursor:pointer; font-size:12px;
+    }
+    #clearBtn {background:#d23f31;}
+
+    #messages {
+      flex:1; overflow-y:auto; padding:10px;
+      background:#ece5dd; display:flex; flex-direction:column;
+      scroll-behavior:smooth;
+    }
+
+    .message {
+      max-width:75%; padding:8px 12px; border-radius:10px;
+      margin:4px 0; word-wrap:break-word; overflow-wrap:break-word;
+    }
+    .me {background:#dcf8c6; align-self:flex-end;}
+    .other {background:white; align-self:flex-start;}
+    .message img, .message video {
+      max-width:100%; border-radius:10px; margin-top:5px;
+    }
+    .message a {color:#075e54; text-decoration:none;}
+    .message small {
+      display:block; font-size:11px; color:#777; margin-top:4px; text-align:right;
+    }
+
+    #input-container {
+      display:flex; padding:10px; background:#f0f0f0;
+      align-items:center; flex-shrink:0;
+    }
+    #msgInput {
+      flex:1; padding:10px; border:1px solid #ccc; border-radius:20px;
+      outline:none;
+    }
+    #sendBtn, #fileBtn {
+      margin-left:10px; background:#075e54; color:white; border:none;
+      border-radius:50%; width:40px; height:40px; cursor:pointer;
+      display:flex; justify-content:center; align-items:center; font-size:18px;
+    }
+
+    ::-webkit-scrollbar {width:6px;}
+    ::-webkit-scrollbar-thumb {
+      background:#ccc; border-radius:3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {background:#999;}
+  </style>
+</head>
+<body>
+  <div id="app-container">
+    <!-- LOGIN SCREEN -->
+    <div id="login-screen" class="active">
+      <h2>Welcome to Firebase Chat</h2>
+      <input id="loginName" type="text" placeholder="Enter your name" />
+      <button id="loginBtn">Login with Name</button>
+    </div>
+
+    <!-- CHAT SCREEN -->
+    <div id="chat-screen">
+      <div id="chat-header">
+        <span id="welcome"></span>
+        <div id="header-buttons">
+          <button id="clearBtn" class="header-btn">Clear Chat</button>
+          <button id="logoutBtn" class="header-btn">Logout</button>
+        </div>
+      </div>
+      <div id="messages"></div>
+      <div id="input-container">
+        <input id="msgInput" type="text" placeholder="Type a message..." />
+        <input type="file" id="fileInput" hidden multiple />
+        <button id="fileBtn">📎</button>
+        <button id="sendBtn">➤</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, serverTimestamp, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+    import { getDatabase, ref as dbRef, push as dbPush, onChildAdded } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-database.js";
+    import { getStorage, ref as sRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-storage.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAGLTgIsMpKW2-nZhA9Bj6L5E42w2yFGTY",
+      authDomain: "chat-app-d70d8.firebaseapp.com",
+      databaseURL: "https://chat-app-d70d8-default-rtdb.firebaseio.com",
+      projectId: "chat-app-d70d8",
+      storageBucket: "chat-app-d70d8.firebasestorage.app",
+      messagingSenderId: "749733045453",
+      appId: "1:749733045453:web:2af24a981878288301b584"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const rtdb = getDatabase(app);
+    const storage = getStorage(app);
+
+    const loginScreen = document.getElementById('login-screen');
+    const chatScreen = document.getElementById('chat-screen');
+    const loginBtn = document.getElementById('loginBtn');
+    const loginName = document.getElementById('loginName');
+    const welcome = document.getElementById('welcome');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const msgInput = document.getElementById('msgInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const fileBtn = document.getElementById('fileBtn');
+    const fileInput = document.getElementById('fileInput');
+    const messagesEl = document.getElementById('messages');
+
+    const messagesCol = collection(db, 'messages');
+    const q = query(messagesCol, orderBy('createdAt'));
+    const rtdbRef = dbRef(rtdb, 'messages');
+
+    // === LOGIN LOGIC ===
+    function checkLogin() {
+      const savedName = localStorage.getItem('chatName');
+      if (savedName) showChat(savedName);
+      else {
+        chatScreen.classList.remove('active');
+        loginScreen.classList.add('active');
+      }
+    }
+
+    function showChat(name) {
+      welcome.textContent = `👋 ${name}`;
+      loginScreen.classList.remove('active');
+      chatScreen.classList.add('active');
+    }
+
+    loginBtn.addEventListener('click', () => {
+      const name = loginName.value.trim();
+      if (name) {
+        localStorage.setItem('chatName', name);
+        showChat(name);
+      } else alert('Please enter a name!');
+    });
+
+    logoutBtn.addEventListener('click', () => {
+      localStorage.removeItem('chatName');
+      location.reload();
+    });
+
+    checkLogin();
+
+    // === MESSAGE LISTENERS ===
+    onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const d = change.doc.data();
+          showMessage({
+            name: d.name,
+            text: d.text,
+            fileUrl: d.fileUrl,
+            fileType: d.fileType,
+            ts: d.createdAt ? d.createdAt.toDate().getTime() : Date.now()
+          });
+        }
+      });
+    });
+
+    onChildAdded(rtdbRef, (snap) => {
+      const val = snap.val();
+      showMessage({
+        name: val.name,
+        text: val.text,
+        fileUrl: val.fileUrl,
+        fileType: val.fileType,
+        ts: val.ts
+      });
+    });
+
+    // === SHOW MESSAGE ===
+    function showMessage({ name, text, fileUrl, fileType, ts }) {
+      const currentName = localStorage.getItem('chatName');
+      const msgDiv = document.createElement('div');
+      msgDiv.classList.add('message', name === currentName ? 'me' : 'other');
+
+      if (text) {
+        const p = document.createElement('div');
+        p.textContent = text;
+        msgDiv.appendChild(p);
+      }
+
+      if (fileUrl) {
+        if (fileType.startsWith('image/')) {
+          const img = document.createElement('img');
+          img.src = fileUrl;
+          msgDiv.appendChild(img);
+        } else if (fileType.startsWith('video/')) {
+          const vid = document.createElement('video');
+          vid.src = fileUrl;
+          vid.controls = true;
+          msgDiv.appendChild(vid);
+        } else {
+          const link = document.createElement('a');
+          link.href = fileUrl;
+          link.target = "_blank";
+          link.textContent = "📄 Download File";
+          msgDiv.appendChild(link);
+        }
+      }
+
+      const meta = document.createElement('small');
+      const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      meta.textContent = `${name} • ${time}`;
+      msgDiv.appendChild(meta);
+
+      messagesEl.appendChild(msgDiv);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // === SEND MESSAGE ===
+    async function sendMessage() {
+      const text = msgInput.value.trim();
+      const name = localStorage.getItem('chatName');
+      if (!text || !name) return;
+
+      await addDoc(messagesCol, { name, text, createdAt: serverTimestamp() });
+      await dbPush(rtdbRef, { name, text, ts: Date.now() });
+      msgInput.value = '';
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    msgInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') sendMessage();
+    });
+
+    // === FILE UPLOAD ===
+    fileBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files);
+      const name = localStorage.getItem('chatName') || 'Guest';
+      for (const file of files) {
+        const ref = sRef(storage, 'uploads/' + Date.now() + '-' + file.name);
+        await uploadBytes(ref, file);
+        const url = await getDownloadURL(ref);
+        await addDoc(messagesCol, { name, fileUrl: url, fileType: file.type, createdAt: serverTimestamp() });
+        await dbPush(rtdbRef, { name, fileUrl: url, fileType: file.type, ts: Date.now() });
+      }
+      fileInput.value = '';
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
+
+    // === CLEAR CHAT LOCALLY ===
+    clearBtn.addEventListener('click', () => {
+      messagesEl.innerHTML = '';
+      alert('Chat cleared locally! (Messages still exist on server)');
+    });
+  </script>
+</body>
+</html>
